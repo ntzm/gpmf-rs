@@ -1,12 +1,16 @@
 extern crate nom;
 
 use chrono::{DateTime, TimeZone, Utc};
+use img_parts::jpeg::markers::APP6;
+use img_parts::jpeg::Jpeg;
 use nom::bytes::complete::{take, take_while_m_n};
+use nom::lib::std::fmt::Formatter;
 use nom::multi::{count, many0, many_m_n};
-use nom::number::complete::{be_f32, be_f64, be_i16, be_i32, be_i64, be_i8, be_u16, be_u32, be_u64, be_u8, be_u128};
+use nom::number::complete::{
+    be_f32, be_f64, be_i16, be_i32, be_i64, be_i8, be_u128, be_u16, be_u32, be_u64, be_u8,
+};
 use nom::sequence::tuple;
 use nom::{IResult, Offset};
-use std::str::from_utf8;
 
 // todo: multiple axis sensor data https://github.com/gopro/gpmf-parser#multiple-axis-sensor-data
 // todo: nesting https://github.com/gopro/gpmf-parser#gpmf-nesting
@@ -18,7 +22,11 @@ struct KP<'a>(&'a [u8], Vec<Type<'a>>);
 
 impl KP<'_> {
     fn pretty_print(&self, depth: usize) {
-        println!("{}{}", " ".repeat(depth), from_utf8(self.0).unwrap());
+        println!(
+            "{}{}",
+            " ".repeat(depth),
+            std::str::from_utf8(self.0).unwrap()
+        );
 
         for t in &self.1 {
             match t {
@@ -26,7 +34,7 @@ impl KP<'_> {
                     for p in pairs {
                         p.pretty_print(depth + 1);
                     }
-                },
+                }
                 _ => println!("{}{:?}", " ".repeat(depth + 1), t),
             }
         }
@@ -53,7 +61,7 @@ enum Type<'a> {
     DateTime(DateTime<Utc>),
     Nested(Vec<KP<'a>>),
     Multi(Vec<Type<'a>>), // is this the best way to handle multiple values?
-    Complex, // todo
+    Complex,              // todo
 }
 
 fn key(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -126,7 +134,7 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
         b'G' => {
             let (i, v) = be_u128(i)?;
             (i, Type::ID(v))
-        }, // todo
+        } // todo
         b'j' if size == 8 => {
             let (i, v) = be_i64(i)?;
             (i, Type::Signed64(v))
@@ -153,11 +161,11 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
         b'q' => {
             println!("{} {:?}", size, i);
             (i, Type::Q32)
-        }, // todo
+        } // todo
         b'Q' => {
             println!("{} {:?}", size, i);
             (i, Type::Q64)
-        }, // todo
+        } // todo
         b's' if size == 2 => {
             let (i, v) = be_i16(i)?;
             (i, Type::Signed16(v))
@@ -176,19 +184,19 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
         b'U' if size == 16 => {
             let (i, v) = take(16u8)(i)?;
             let dt = Utc
-                .datetime_from_str(from_utf8(v).unwrap(), "%y%m%d%H%M%S%.3f")
+                .datetime_from_str(std::str::from_utf8(v).unwrap(), "%y%m%d%H%M%S%.3f")
                 .unwrap();
             (i, Type::DateTime(dt))
         }
         b'\0' => {
             let (i, v) = parse(i)?;
             (i, Type::Nested(v))
-        },
+        }
         b'?' => {
             // skip complex for now
             let (i, _) = take(size)(i)?;
             (i, Type::Complex)
-        }, // todo
+        } // todo
         _ => panic!(format!("Unknown type {} with size {}", t as char, size)),
     })
 }
@@ -218,9 +226,59 @@ fn parse(i: &[u8]) -> IResult<&[u8], Vec<KP>> {
     many0(kv)(i)
 }
 
+#[derive(Debug)]
+enum JpgExtractError {
+    Io(std::io::Error),
+    FromBytes(img_parts::Error),
+    MissingApp6,
+    InvalidApp6,
+}
+
+impl std::error::Error for JpgExtractError {}
+
+impl std::fmt::Display for JpgExtractError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JpgExtractError::Io(e) => e.fmt(f),
+            JpgExtractError::FromBytes(e) => e.fmt(f),
+            JpgExtractError::MissingApp6 => write!(f, "Missing APP6"),
+            JpgExtractError::InvalidApp6 => write!(f, "Invalid APP6"),
+        }
+    }
+}
+
+impl From<img_parts::Error> for JpgExtractError {
+    fn from(e: img_parts::Error) -> Self {
+        JpgExtractError::FromBytes(e)
+    }
+}
+
+impl From<std::io::Error> for JpgExtractError {
+    fn from(e: std::io::Error) -> Self {
+        JpgExtractError::Io(e)
+    }
+}
+
+fn extract_from_jpg<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, JpgExtractError> {
+    let input = std::fs::read(path)?;
+    let jpg = Jpeg::from_bytes(input.into())?;
+    let bytes = jpg
+        .segment_by_marker(APP6)
+        .ok_or(JpgExtractError::MissingApp6)?
+        .contents();
+
+    if &bytes[..6] != b"GoPro\0" {
+        return Err(JpgExtractError::InvalidApp6);
+    }
+
+    Ok(bytes[6..].to_owned())
+}
+
 fn main() {
-    let i = std::fs::read("hero6.raw").unwrap();
-    let (_, pairs) = parse(&i).unwrap();
+    let args: Vec<String> = std::env::args().collect();
+    let b = extract_from_jpg(args.get(1).unwrap()).unwrap();
+
+    let (_, pairs) = parse(&b).unwrap();
 
     for p in pairs {
         p.pretty_print(0);
