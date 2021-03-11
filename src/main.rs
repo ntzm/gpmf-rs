@@ -122,10 +122,7 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
         }
         b'f' => {
             let (i, v) = many_m_n(size as usize / 4, size as usize / 4, be_f32)(i)?;
-            (
-                i,
-                Type::Multi(v.into_iter().map(|v| Type::Float(v)).collect()),
-            )
+            (i, Type::Multi(v.into_iter().map(Type::Float).collect()))
         }
         b'F' if size == 4 => {
             let (i, v) = take(4u8)(i)?;
@@ -149,10 +146,7 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
         }
         b'l' => {
             let (i, v) = many_m_n(size as usize / 4, size as usize / 4, be_i32)(i)?;
-            (
-                i,
-                Type::Multi(v.into_iter().map(|v| Type::Signed32(v)).collect()),
-            )
+            (i, Type::Multi(v.into_iter().map(Type::Signed32).collect()))
         }
         b'L' if size == 4 => {
             let (i, v) = be_u32(i)?;
@@ -172,10 +166,7 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
         }
         b's' => {
             let (i, v) = many_m_n(size as usize / 2, size as usize / 2, be_i16)(i)?;
-            (
-                i,
-                Type::Multi(v.into_iter().map(|v| Type::Signed16(v)).collect()),
-            )
+            (i, Type::Multi(v.into_iter().map(Type::Signed16).collect()))
         }
         b'S' if size == 2 => {
             let (i, v) = be_u16(i)?;
