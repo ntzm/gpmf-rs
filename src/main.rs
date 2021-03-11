@@ -280,7 +280,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse, Type};
+    use crate::{parse, Type, KP};
     use chrono::{TimeZone, Utc};
 
     #[test]
@@ -294,7 +294,7 @@ mod tests {
             parse(&b"DEMOb\x01\x00\x01\xf2\0\0\0"[..]),
             Ok((
                 &b""[..],
-                vec![(&b"DEMO"[..], vec![Type::SignedByte(-14i8)])]
+                vec![KP(&b"DEMO"[..], vec![Type::SignedByte(-14i8)])]
             ))
         )
     }
@@ -305,7 +305,7 @@ mod tests {
             parse(&b"DEMOB\x01\x00\x01\xff\0\0\0"[..]),
             Ok((
                 &b""[..],
-                vec![(&b"DEMO"[..], vec![Type::UnsignedByte(255u8)])]
+                vec![KP(&b"DEMO"[..], vec![Type::UnsignedByte(255u8)])]
             ))
         )
     }
@@ -314,7 +314,7 @@ mod tests {
     fn it_reads_char() {
         assert_eq!(
             parse(&b"DEMOc\x01\x00\x01a\0\0\0"[..]),
-            Ok((&b""[..], vec![(&b"DEMO"[..], vec![Type::Char('a')])]))
+            Ok((&b""[..], vec![KP(&b"DEMO"[..], vec![Type::Char('a')])]))
         )
     }
 
@@ -324,7 +324,7 @@ mod tests {
             parse(&b"DEMOU\x10\x00\x01210309140223.123"[..]),
             Ok((
                 &b""[..],
-                vec![(
+                vec![KP(
                     &b"DEMO"[..],
                     vec![Type::DateTime(
                         Utc.ymd(2021, 3, 9).and_hms_milli(14, 2, 23, 123)
@@ -340,7 +340,7 @@ mod tests {
             parse(&b"GYROs\x06\x00\x01\xf1\xe7\xf6\x1a\xfa\xcc\0\0"[..]),
             Ok((
                 &b""[..],
-                vec![(
+                vec![KP(
                     &b"GYRO"[..],
                     vec![Type::Multi(vec![
                         Type::Signed16(-3609),
