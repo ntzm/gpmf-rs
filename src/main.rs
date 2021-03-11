@@ -22,6 +22,8 @@ struct KP<'a>(&'a [u8], Vec<Type<'a>>);
 
 impl KP<'_> {
     fn pretty_print(&self, depth: usize) {
+        println!();
+
         println!(
             "{}{}",
             " ".repeat(depth),
@@ -35,7 +37,7 @@ impl KP<'_> {
                         p.pretty_print(depth + 1);
                     }
                 }
-                _ => println!("{}{:?}", " ".repeat(depth + 1), t),
+                _ => print!("{}{:?}", " ".repeat(depth + 1), t),
             }
         }
     }
