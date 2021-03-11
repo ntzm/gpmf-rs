@@ -13,9 +13,12 @@ use nom::sequence::tuple;
 use nom::{IResult, Offset};
 
 // todo: multiple axis sensor data https://github.com/gopro/gpmf-parser#multiple-axis-sensor-data
-// todo: nesting https://github.com/gopro/gpmf-parser#gpmf-nesting
-// todo: typedef https://github.com/gopro/gpmf-parser#modifiers-supported
+//       for more data types
+// todo: typedef/complex https://github.com/gopro/gpmf-parser#modifiers-supported
 // todo: Q numbers
+// todo: make type P in KP instead of Vec<Type>
+// todo: read MP4
+// todo: move extraction logic to different library
 
 #[derive(Debug, PartialEq)]
 struct KP<'a>(&'a [u8], Vec<Type<'a>>);
