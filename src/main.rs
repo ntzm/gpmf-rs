@@ -1,10 +1,12 @@
+mod error;
+
 extern crate nom;
 
 use chrono::{DateTime, TimeZone, Utc};
+use error::JpgExtractError;
 use img_parts::jpeg::markers::APP6;
 use img_parts::jpeg::Jpeg;
 use nom::bytes::complete::{take, take_while_m_n};
-use nom::lib::std::fmt::Formatter;
 use nom::multi::{count, many0, many_m_n};
 use nom::number::complete::{
     be_f32, be_f64, be_i16, be_i32, be_i64, be_i8, be_u128, be_u16, be_u32, be_u64, be_u8,
@@ -69,6 +71,109 @@ enum Type<'a> {
     Complex,              // todo
 }
 
+impl Type<'_> {
+    fn from_data(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
+        Ok(match t {
+            b'b' if size == 1 => {
+                let (i, v) = be_i8(i)?;
+                (i, Type::SignedByte(v))
+            }
+            b'B' if size == 1 => {
+                let (i, v) = be_u8(i)?;
+                (i, Type::UnsignedByte(v))
+            }
+            b'c' if size == 1 => {
+                let (i, v) = be_u8(i)?;
+                (i, Type::Char(v as char))
+            }
+            b'c' => {
+                let (i, v) = many_m_n(size as usize, size as usize, be_u8)(i)?;
+                (
+                    i,
+                    Type::Multi(v.into_iter().map(|v| Type::Char(v as char)).collect()),
+                )
+            }
+            b'd' if size == 8 => {
+                let (i, v) = be_f64(i)?;
+                (i, Type::Double(v))
+            }
+            b'f' if size == 4 => {
+                let (i, v) = be_f32(i)?;
+                (i, Type::Float(v))
+            }
+            b'f' => {
+                let (i, v) = many_m_n(size as usize / 4, size as usize / 4, be_f32)(i)?;
+                (i, Type::Multi(v.into_iter().map(Type::Float).collect()))
+            }
+            b'F' if size == 4 => {
+                let (i, v) = take(4u8)(i)?;
+                (i, Type::Key(v))
+            }
+            b'G' => {
+                let (i, v) = be_u128(i)?;
+                (i, Type::ID(v))
+            } // todo
+            b'j' if size == 8 => {
+                let (i, v) = be_i64(i)?;
+                (i, Type::Signed64(v))
+            }
+            b'J' if size == 8 => {
+                let (i, v) = be_u64(i)?;
+                (i, Type::Unsigned64(v))
+            }
+            b'l' if size == 4 => {
+                let (i, v) = be_i32(i)?;
+                (i, Type::Signed32(v))
+            }
+            b'l' => {
+                let (i, v) = many_m_n(size as usize / 4, size as usize / 4, be_i32)(i)?;
+                (i, Type::Multi(v.into_iter().map(Type::Signed32).collect()))
+            }
+            b'L' if size == 4 => {
+                let (i, v) = be_u32(i)?;
+                (i, Type::Unsigned32(v))
+            }
+            b'q' => {
+                println!("{} {:?}", size, i);
+                (i, Type::Q32)
+            } // todo
+            b'Q' => {
+                println!("{} {:?}", size, i);
+                (i, Type::Q64)
+            } // todo
+            b's' if size == 2 => {
+                let (i, v) = be_i16(i)?;
+                (i, Type::Signed16(v))
+            }
+            b's' => {
+                let (i, v) = many_m_n(size as usize / 2, size as usize / 2, be_i16)(i)?;
+                (i, Type::Multi(v.into_iter().map(Type::Signed16).collect()))
+            }
+            b'S' if size == 2 => {
+                let (i, v) = be_u16(i)?;
+                (i, Type::Unsigned16(v))
+            }
+            b'U' if size == 16 => {
+                let (i, v) = take(16u8)(i)?;
+                let dt = Utc
+                    .datetime_from_str(std::str::from_utf8(v).unwrap(), "%y%m%d%H%M%S%.3f")
+                    .unwrap();
+                (i, Type::DateTime(dt))
+            }
+            b'\0' => {
+                let (i, v) = parse(i)?;
+                (i, Type::Nested(v))
+            }
+            b'?' => {
+                // skip complex for now
+                let (i, _) = take(size)(i)?;
+                (i, Type::Complex)
+            } // todo
+            _ => panic!(format!("Unknown type {} with size {}", t as char, size)),
+        })
+    }
+}
+
 fn key(i: &[u8]) -> IResult<&[u8], &[u8]> {
     take(4u8)(i)
 }
@@ -96,107 +201,6 @@ fn repeat(i: &[u8]) -> IResult<&[u8], u16> {
     be_u16(i)
 }
 
-fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
-    Ok(match t {
-        b'b' if size == 1 => {
-            let (i, v) = be_i8(i)?;
-            (i, Type::SignedByte(v))
-        }
-        b'B' if size == 1 => {
-            let (i, v) = be_u8(i)?;
-            (i, Type::UnsignedByte(v))
-        }
-        b'c' if size == 1 => {
-            let (i, v) = be_u8(i)?;
-            (i, Type::Char(v as char))
-        }
-        b'c' => {
-            let (i, v) = many_m_n(size as usize, size as usize, be_u8)(i)?;
-            (
-                i,
-                Type::Multi(v.into_iter().map(|v| Type::Char(v as char)).collect()),
-            )
-        }
-        b'd' if size == 8 => {
-            let (i, v) = be_f64(i)?;
-            (i, Type::Double(v))
-        }
-        b'f' if size == 4 => {
-            let (i, v) = be_f32(i)?;
-            (i, Type::Float(v))
-        }
-        b'f' => {
-            let (i, v) = many_m_n(size as usize / 4, size as usize / 4, be_f32)(i)?;
-            (i, Type::Multi(v.into_iter().map(Type::Float).collect()))
-        }
-        b'F' if size == 4 => {
-            let (i, v) = take(4u8)(i)?;
-            (i, Type::Key(v))
-        }
-        b'G' => {
-            let (i, v) = be_u128(i)?;
-            (i, Type::ID(v))
-        } // todo
-        b'j' if size == 8 => {
-            let (i, v) = be_i64(i)?;
-            (i, Type::Signed64(v))
-        }
-        b'J' if size == 8 => {
-            let (i, v) = be_u64(i)?;
-            (i, Type::Unsigned64(v))
-        }
-        b'l' if size == 4 => {
-            let (i, v) = be_i32(i)?;
-            (i, Type::Signed32(v))
-        }
-        b'l' => {
-            let (i, v) = many_m_n(size as usize / 4, size as usize / 4, be_i32)(i)?;
-            (i, Type::Multi(v.into_iter().map(Type::Signed32).collect()))
-        }
-        b'L' if size == 4 => {
-            let (i, v) = be_u32(i)?;
-            (i, Type::Unsigned32(v))
-        }
-        b'q' => {
-            println!("{} {:?}", size, i);
-            (i, Type::Q32)
-        } // todo
-        b'Q' => {
-            println!("{} {:?}", size, i);
-            (i, Type::Q64)
-        } // todo
-        b's' if size == 2 => {
-            let (i, v) = be_i16(i)?;
-            (i, Type::Signed16(v))
-        }
-        b's' => {
-            let (i, v) = many_m_n(size as usize / 2, size as usize / 2, be_i16)(i)?;
-            (i, Type::Multi(v.into_iter().map(Type::Signed16).collect()))
-        }
-        b'S' if size == 2 => {
-            let (i, v) = be_u16(i)?;
-            (i, Type::Unsigned16(v))
-        }
-        b'U' if size == 16 => {
-            let (i, v) = take(16u8)(i)?;
-            let dt = Utc
-                .datetime_from_str(std::str::from_utf8(v).unwrap(), "%y%m%d%H%M%S%.3f")
-                .unwrap();
-            (i, Type::DateTime(dt))
-        }
-        b'\0' => {
-            let (i, v) = parse(i)?;
-            (i, Type::Nested(v))
-        }
-        b'?' => {
-            // skip complex for now
-            let (i, _) = take(size)(i)?;
-            (i, Type::Complex)
-        } // todo
-        _ => panic!(format!("Unknown type {} with size {}", t as char, size)),
-    })
-}
-
 // format:
 // key (four ASCII chars (u8))
 //   can be anything
@@ -212,7 +216,7 @@ fn val(i: &[u8], t: u8, size: u8) -> IResult<&[u8], Type> {
 
 fn kv(inp: &[u8]) -> IResult<&[u8], KP> {
     let (i, (key, typ, size, repeat)) = tuple((key, typ, size, repeat))(inp)?;
-    let (i, v) = count(|i| val(i, typ, size), repeat as usize)(i)?;
+    let (i, v) = count(|i| Type::from_data(i, typ, size), repeat as usize)(i)?;
     let (i, _) = padding(i, inp.offset(i))?;
 
     Ok((i, KP(key, v)))
@@ -220,39 +224,6 @@ fn kv(inp: &[u8]) -> IResult<&[u8], KP> {
 
 fn parse(i: &[u8]) -> IResult<&[u8], Vec<KP>> {
     many0(kv)(i)
-}
-
-#[derive(Debug)]
-enum JpgExtractError {
-    Io(std::io::Error),
-    FromBytes(img_parts::Error),
-    MissingApp6,
-    InvalidApp6,
-}
-
-impl std::error::Error for JpgExtractError {}
-
-impl std::fmt::Display for JpgExtractError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            JpgExtractError::Io(e) => e.fmt(f),
-            JpgExtractError::FromBytes(e) => e.fmt(f),
-            JpgExtractError::MissingApp6 => write!(f, "Missing APP6"),
-            JpgExtractError::InvalidApp6 => write!(f, "Invalid APP6"),
-        }
-    }
-}
-
-impl From<img_parts::Error> for JpgExtractError {
-    fn from(e: img_parts::Error) -> Self {
-        JpgExtractError::FromBytes(e)
-    }
-}
-
-impl From<std::io::Error> for JpgExtractError {
-    fn from(e: std::io::Error) -> Self {
-        JpgExtractError::Io(e)
-    }
 }
 
 fn extract_from_jpg<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<u8>, JpgExtractError> {
